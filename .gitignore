@@ -16,3 +16,9 @@ backend/venv/
 node_modules/
 frontend/build/
 frontend/dist/
+# Terraform
+terraform/.terraform/
+terraform/**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan

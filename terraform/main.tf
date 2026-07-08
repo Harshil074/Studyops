@@ -9,3 +9,7 @@ module "rds" {
   subnet_ids  = module.vpc.public_subnet_ids
   db_password = var.db_password
 }
+
+module "ecr" {
+  source = "./modules/ecr"
+}

@@ -1,9 +1,10 @@
 resource "aws_ecr_repository" "main" {
   name                 = var.repository_name
   image_tag_mutability = "MUTABLE"
+  force_delete         = true  # allows `terraform destroy` to delete even if images exist
 
   image_scanning_configuration {
-    scan_on_push = true  # Trivy-style vulnerability scanning, built into ECR itself
+    scan_on_push = true
   }
 
   tags = {

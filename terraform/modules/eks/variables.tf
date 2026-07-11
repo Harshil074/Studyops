@@ -18,7 +18,7 @@ variable "node_instance_type" {
 
 variable "node_desired_size" {
   type    = number
-  default = 1
+  default = 2  # was 1 — bumped after hitting pod scheduling limits with ArgoCD on a single node
 }
 
 variable "node_min_size" {

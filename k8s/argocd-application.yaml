@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: studyops-backend
+  namespace: argocd
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/Harshil074/studyops.git
+    targetRevision: main
+    path: k8s
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+
+  syncPolicy:
+    automated:
+      prune: true       # if you delete a manifest from git, ArgoCD removes it from the cluster too
+      selfHeal: true     # if someone manually kubectl-edits the cluster, ArgoCD reverts it to match git
+    syncOptions:
+      - CreateNamespace=true

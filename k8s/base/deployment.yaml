@@ -20,6 +20,8 @@ spec:
           envFrom:
             - secretRef:
                 name: studyops-secrets
+            - configMapRef:
+                name: studyops-config
           readinessProbe:
             httpGet:
               path: /health/ready

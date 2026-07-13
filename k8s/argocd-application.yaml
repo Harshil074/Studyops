@@ -9,7 +9,7 @@ spec:
   source:
     repoURL: https://github.com/Harshil074/studyops.git
     targetRevision: main
-    path: k8s
+    path: k8s/overlays/prod
 
   destination:
     server: https://kubernetes.default.svc

@@ -21,4 +21,5 @@ terraform/.terraform/
 terraform/**/.terraform/
 *.tfstate
 *.tfstate.*
-*.tfplan*.pem
+*.pem
+*.tfplan

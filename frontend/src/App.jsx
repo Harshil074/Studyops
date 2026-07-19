@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from './context/AuthContext'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
+import Homework from './pages/Homework'
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth()
@@ -21,6 +22,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/homework"
+            element={
+              <ProtectedRoute>
+                <Homework />
               </ProtectedRoute>
             }
           />

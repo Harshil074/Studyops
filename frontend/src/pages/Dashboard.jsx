@@ -1,5 +1,5 @@
 import { useAuth } from '../context/AuthContext'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 
 function Dashboard() {
   const { logoutUser } = useAuth()
@@ -15,13 +15,22 @@ function Dashboard() {
       <h1 className="text-3xl font-bold text-white mb-2">
         Welcome to <span className="text-blue-400">StudyOps</span>
       </h1>
-      <p className="text-slate-400 mb-6">You're logged in. Homework, mock tests, and your live progress dashboard land here next.</p>
-      <button
-        onClick={handleLogout}
-        className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition"
-      >
-        Log Out
-      </button>
+      <p className="text-slate-400 mb-6">You're logged in. Mock tests and your live progress dashboard land here next.</p>
+
+      <div className="flex gap-3">
+        <Link
+          to="/homework"
+          className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition"
+        >
+          Go to Homework
+        </Link>
+        <button
+          onClick={handleLogout}
+          className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition"
+        >
+          Log Out
+        </button>
+      </div>
     </div>
   )
 }

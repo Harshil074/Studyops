@@ -4,6 +4,7 @@ import Login from './pages/Login'
 import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
 import Homework from './pages/Homework'
+import MockTests from './pages/MockTests'
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth()
@@ -17,6 +18,7 @@ function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/mock-tests" element={<ProtectedRoute><MockTests /></ProtectedRoute>} />
           <Route
             path="/dashboard"
             element={

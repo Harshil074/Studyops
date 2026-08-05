@@ -1,1 +1,103 @@
 @import "tailwindcss";
+
+/*
+  StudyOps design tokens.
+
+  Legacy names (ink / surface / paper / highlighter / mint / coral) are kept
+  as aliases so the existing AppShell + Dashboard markup keeps working
+  untouched. New work should prefer the semantic names (primary, secondary,
+  accent, success, danger, border, muted) — both point at the same values.
+*/
+@theme {
+  /* semantic palette */
+  --color-background: #09090b;
+  --color-surface-1: #12131a;
+  --color-surface-2: #18181b;
+  --color-border: #27272a;
+  --color-text: #f8fafc;
+  --color-muted: #94a3b8;
+  --color-primary: #7c3aed;
+  --color-primary-hover: #6d28d9;
+  --color-secondary: #06b6d4;
+  --color-accent: #facc15;
+  --color-success: #22c55e;
+  --color-danger: #ef4444;
+
+  /* legacy aliases used by existing components — same values, kept in sync */
+  --color-ink: #09090b;
+  --color-surface: #12131a;
+  --color-paper: #f8fafc;
+  --color-highlighter: #7c3aed;
+  --color-mint: #22c55e;
+  --color-coral: #ef4444;
+
+  --font-display: "Poppins", "Inter", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+
+  --shadow-glow-primary: 0 0 24px rgba(124, 58, 237, 0.35);
+  --shadow-glow-secondary: 0 0 24px rgba(6, 182, 212, 0.3);
+}
+
+body {
+  font-family: var(--font-body);
+  background-color: var(--color-background);
+  color: var(--color-text);
+}
+
+* {
+  border-color: var(--color-border);
+}
+
+/* visible, consistent focus ring across the app (accessibility) */
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+::selection {
+  background-color: var(--color-primary);
+  color: var(--color-text);
+}
+
+/* thin, unobtrusive scrollbar to match the dark surface */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: var(--color-surface-2);
+  border-radius: 999px;
+  border: 2px solid var(--color-background);
+}
+
+.aurora-bg {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+.aurora-bg::before,
+.aurora-bg::after {
+  content: '';
+  position: absolute;
+  width: 520px;
+  height: 520px;
+  border-radius: 50%;
+  filter: blur(120px);
+  opacity: 0.35;
+}
+.aurora-bg::before {
+  background: var(--color-primary);
+  top: -160px;
+  left: -120px;
+}
+.aurora-bg::after {
+  background: var(--color-secondary);
+  bottom: -160px;
+  right: -120px;
+}

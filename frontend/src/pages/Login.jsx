@@ -1,83 +1,94 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { Mail, Lock, Eye, EyeOff } from 'lucide-react'
 import { login } from '../api/auth'
 import { useAuth } from '../context/AuthContext'
+import { loginSchema } from '../utils/validation'
+import { ROUTES } from '../constants/routes'
+import AuthLayout from '../components/layout/AuthLayout'
+import Input from '../components/ui/Input'
+import Button from '../components/ui/Button'
+import Alert from '../components/ui/Alert'
 
 function Login() {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [serverError, setServerError] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
 
   const { loginUser } = useAuth()
   const navigate = useNavigate()
 
-  async function handleSubmit(e) {
-    e.preventDefault()
-    setError('')
-    setLoading(true)
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm({ resolver: zodResolver(loginSchema) })
+
+  async function onSubmit(values) {
+    setServerError('')
     try {
-      const data = await login({ email, password })
+      const data = await login(values)
       loginUser(data.access_token)
-      navigate('/dashboard')
+      navigate(ROUTES.DASHBOARD)
     } catch (err) {
-      setError(err.response?.data?.detail || 'Login failed. Check your credentials.')
-    } finally {
-      setLoading(false)
+      setServerError(err.response?.data?.detail || 'Login failed. Check your credentials.')
     }
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center px-4">
-      <div className="w-full max-w-sm bg-slate-800 rounded-xl shadow-lg p-8">
-        <h1 className="text-2xl font-bold text-white mb-6 text-center">
-          StudyOps <span className="text-blue-400">Login</span>
-        </h1>
-
-        {error && (
-          <div className="bg-red-500/10 border border-red-500 text-red-400 text-sm rounded-lg px-4 py-2 mb-4">
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm text-slate-300 mb-1">Email</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              className="w-full rounded-lg bg-slate-700 text-white px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div>
-            <label className="block text-sm text-slate-300 mb-1">Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              className="w-full rounded-lg bg-slate-700 text-white px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-blue-500 hover:bg-blue-600 disabled:opacity-50 text-white font-medium py-2 rounded-lg transition"
-          >
-            {loading ? 'Logging in...' : 'Log In'}
-          </button>
-        </form>
-
-        <p className="text-slate-400 text-sm text-center mt-4">
+    <AuthLayout
+      title="Welcome back"
+      subtitle="Log in to pick up where you left off."
+      footer={
+        <p className="font-body text-sm text-muted">
           No account?{' '}
-          <Link to="/register" className="text-blue-400 hover:underline">
+          <Link to={ROUTES.REGISTER} className="text-primary hover:underline font-medium">
             Register
           </Link>
         </p>
-      </div>
-    </div>
+      }
+    >
+      {serverError && (
+        <Alert tone="danger" className="mb-4">
+          {serverError}
+        </Alert>
+      )}
+
+      <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
+        <Input
+          label="Email"
+          type="email"
+          icon={Mail}
+          autoComplete="email"
+          error={errors.email?.message}
+          {...register('email')}
+        />
+
+        <Input
+          label="Password"
+          type={showPassword ? 'text' : 'password'}
+          icon={Lock}
+          autoComplete="current-password"
+          error={errors.password?.message}
+          rightElement={
+            <button
+              type="button"
+              onClick={() => setShowPassword((v) => !v)}
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              className="text-muted hover:text-text"
+            >
+              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+          }
+          {...register('password')}
+        />
+
+        <Button type="submit" loading={isSubmitting} className="w-full justify-center mt-2">
+          {isSubmitting ? 'Logging in...' : 'Log in'}
+        </Button>
+      </form>
+    </AuthLayout>
   )
 }
 

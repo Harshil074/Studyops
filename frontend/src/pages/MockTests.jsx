@@ -1,19 +1,38 @@
-import { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { getMockTests, getMockTest, submitMockTest } from '../api/mocktests'
+import AppShell from '../components/layout/AppShell'
+import Spinner from '../components/ui/Spinner'
+import Alert from '../components/ui/Alert'
+import TestFilters from '../components/mocktests/TestFilters'
+import TestCard from '../components/mocktests/TestCard'
+import TestRunner from '../components/mocktests/TestRunner'
+import ResultCard from '../components/mocktests/ResultCard'
+import { StaggerContainer, StaggerItem } from '../components/ui/Stagger'
+import { filterTests, uniqueTestSubjects } from '../utils/mocktests'
 
 function MockTests() {
   const [tests, setTests] = useState([])
+  const [loading, setLoading] = useState(true)
   const [activeTest, setActiveTest] = useState(null)
   const [answers, setAnswers] = useState({})
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
 
+  // Session-only "last attempt" scores — real, but not persisted anywhere
+  // (the backend has no attempt-history endpoint), so this resets on reload.
+  const [sessionScores, setSessionScores] = useState({})
+
+  const [search, setSearch] = useState('')
+  const [subjectFilter, setSubjectFilter] = useState('')
+
   useEffect(() => {
-    getMockTests().then(setTests).catch(() => setError('Failed to load tests.'))
+    getMockTests()
+      .then(setTests)
+      .catch(() => setError('Failed to load tests.'))
+      .finally(() => setLoading(false))
   }, [])
 
-  async function openTest(testId) {
+  const openTest = useCallback(async (testId) => {
     setResult(null)
     setAnswers({})
     try {
@@ -22,7 +41,7 @@ function MockTests() {
     } catch {
       setError('Failed to load test.')
     }
-  }
+  }, [])
 
   function selectAnswer(questionId, optionIndex) {
     setAnswers((prev) => ({ ...prev, [questionId]: optionIndex }))
@@ -32,75 +51,84 @@ function MockTests() {
     try {
       const data = await submitMockTest(activeTest.id, answers)
       setResult(data)
+      const pct = data.total_questions ? Math.round((data.score / data.total_questions) * 100) : 0
+      setSessionScores((prev) => ({ ...prev, [activeTest.id]: pct }))
     } catch {
       setError('Failed to submit test.')
     }
   }
 
-  return (
-    <div className="min-h-screen bg-slate-900 px-4 py-8">
-      <div className="max-w-2xl mx-auto">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold text-white">Mock Tests</h1>
-          <Link to="/dashboard" className="text-slate-400 hover:text-white text-sm">← Dashboard</Link>
-        </div>
+  function backToTests() {
+    setActiveTest(null)
+    setResult(null)
+  }
 
-        {error && <div className="bg-red-500/10 border border-red-500 text-red-400 text-sm rounded-lg px-4 py-2 mb-4">{error}</div>}
+  const subjects = useMemo(() => uniqueTestSubjects(tests), [tests])
+  const visibleTests = useMemo(
+    () => filterTests(tests, { search, subject: subjectFilter }),
+    [tests, search, subjectFilter]
+  )
+
+  if (loading) {
+    return (
+      <AppShell>
+        <div className="flex items-center justify-center h-[60vh]">
+          <Spinner label="Loading mock tests..." />
+        </div>
+      </AppShell>
+    )
+  }
+
+  return (
+    <AppShell>
+      <div className="max-w-6xl">
+        <h1 className="font-display font-semibold text-2xl sm:text-3xl text-text mb-6">Mock Tests</h1>
+
+        {error && (
+          <Alert tone="danger" className="mb-4">
+            {error}
+          </Alert>
+        )}
 
         {!activeTest && (
-          <ul className="space-y-2">
-            {tests.map((t) => (
-              <li key={t.id} className="bg-slate-800 rounded-lg px-4 py-3 flex justify-between items-center">
-                <div>
-                  <p className="text-white">{t.title}</p>
-                  <p className="text-slate-400 text-xs">{t.subject}</p>
-                </div>
-                <button onClick={() => openTest(t.id)} className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded-lg text-sm">
-                  Take Test
-                </button>
-              </li>
-            ))}
-          </ul>
+          <>
+            <TestFilters
+              search={search}
+              onSearchChange={setSearch}
+              subject={subjectFilter}
+              onSubjectChange={setSubjectFilter}
+              subjects={subjects}
+            />
+
+            {visibleTests.length === 0 ? (
+              <p className="font-body text-sm text-muted text-center py-12">
+                {tests.length === 0 ? 'No mock tests available yet.' : 'No tests match your filters.'}
+              </p>
+            ) : (
+              <StaggerContainer className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {visibleTests.map((t) => (
+                  <StaggerItem key={t.id}>
+                    <TestCard test={t} lastScorePct={sessionScores[t.id]} onStart={openTest} />
+                  </StaggerItem>
+                ))}
+              </StaggerContainer>
+            )}
+          </>
         )}
 
         {activeTest && !result && (
-          <div className="bg-slate-800 rounded-xl p-6 space-y-6">
-            <h2 className="text-xl font-bold text-white">{activeTest.title}</h2>
-            {activeTest.questions.map((q, i) => (
-              <div key={q.id}>
-                <p className="text-white mb-2">{i + 1}. {q.question_text}</p>
-                <div className="space-y-1">
-                  {q.options.map((opt, idx) => (
-                    <label key={idx} className="flex items-center gap-2 text-slate-300">
-                      <input
-                        type="radio"
-                        name={q.id}
-                        checked={answers[q.id] === idx}
-                        onChange={() => selectAnswer(q.id, idx)}
-                        className="accent-blue-500"
-                      />
-                      {opt}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            ))}
-            <button onClick={handleSubmit} className="w-full bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 rounded-lg">
-              Submit
-            </button>
-          </div>
+          <TestRunner
+            test={activeTest}
+            answers={answers}
+            onSelectAnswer={selectAnswer}
+            onSubmit={handleSubmit}
+            onCancel={backToTests}
+          />
         )}
 
-        {result && (
-          <div className="bg-slate-800 rounded-xl p-6 text-center">
-            <h2 className="text-2xl font-bold text-white mb-2">Score: {result.score}/{result.total_questions}</h2>
-            <button onClick={() => setActiveTest(null)} className="mt-4 bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg">
-              Back to tests
-            </button>
-          </div>
-        )}
+        {result && <ResultCard result={result} onBack={backToTests} />}
       </div>
-    </div>
+    </AppShell>
   )
 }
 

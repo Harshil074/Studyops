@@ -1,7 +1,9 @@
 import apiClient from './client'
 
-export async function getHomework() {
-  const response = await apiClient.get('/homework')
+export async function getHomework(onlyPending) {
+  const response = await apiClient.get('/homework', {
+    params: onlyPending ? { only_pending: true } : {},
+  })
   return response.data
 }
 

@@ -16,13 +16,8 @@ export function useDashboardData() {
   const [loading, setLoading] = useState(true)
   const [liveEvent, setLiveEvent] = useState(null)
 
-  // Build the WS URL relative to wherever the app is actually being served from,
-  // instead of hardcoding localhost:8000. This works for both local dev (Vite
-  // proxies /api to the backend) and production (ALB routes /api/* to the
-  // backend target group — the websocket route is mounted under /api too, at
-  // /api/ws/progress, specifically so it matches that same ALB rule).
-  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const wsUrl = token ? `${wsProtocol}//${window.location.host}/api/ws/progress?token=${token}` : null
+  // Same WebSocket wiring as the original Dashboard.jsx — untouched.
+  const wsUrl = token ? `ws://localhost:8000/ws/progress?token=${token}` : null
   const { lastJsonMessage, readyState } = useWebSocket(wsUrl, {
     shouldReconnect: () => true,
     reconnectInterval: 3000,

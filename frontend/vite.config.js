@@ -4,18 +4,6 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  server: {
-    // Lets `npm run dev` use the same relative '/api' paths the production
-    // build uses (where the ALB does this routing instead). Points at the
-    // backend running locally via `docker compose up` or `uvicorn main:app`.
-    proxy: {
-      '/api': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-        ws: true,
-      },
-    },
-  },
   build: {
     rollupOptions: {
       output: {

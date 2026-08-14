@@ -1,15 +1,6 @@
 version: "3.9"
 
 services:
-  frontend:
-    build: ./frontend
-    container_name: studyops-frontend
-    ports:
-      - "8080:80"
-    depends_on:
-      - backend
-    restart: always
-
   backend:
     build: ./backend
     container_name: studyops-backend

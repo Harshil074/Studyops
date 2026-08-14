@@ -2,19 +2,22 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install dependencies first so this layer is cached
-# unless requirements.txt changes
+# Copy dependency definition first for better Docker layer caching
 COPY requirements.txt .
 
-RUN pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir --upgrade \
-        "jaraco.context>=6.1.0" \
-        "wheel>=0.46.2"
+# Install application dependencies and upgrade packaging tools
+# to versions containing security fixes.
+RUN pip install --no-cache-dir --upgrade \
+        pip \
+        setuptools \
+        wheel \
+        jaraco.context \
+    && pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy application source
 COPY . .
 
-# Don't run the application as root
+# Run the application as a non-root user
 RUN useradd --create-home appuser
 USER appuser
 

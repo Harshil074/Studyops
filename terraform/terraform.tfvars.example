@@ -1,0 +1,35 @@
+# Copy to terraform.tfvars and fill in non-sensitive values.
+# NEVER put db_password or jwt_secret_key in this file or in terraform.tfvars —
+# both are marked sensitive and must be supplied as environment variables:
+#
+#   export TF_VAR_db_password="..."
+#   export TF_VAR_jwt_secret_key="$(openssl rand -hex 32)"
+#
+# terraform.tfvars itself is gitignored, but env vars avoid ever writing the
+# secret to disk in the first place.
+
+aws_region  = "ap-south-1"
+db_username = "studyops"
+
+# Keep at 1 while demoing — each additional task is additional Fargate cost.
+ecs_desired_count = 1
+
+# Push :latest to both ECR repos (see README "First deploy" section) before
+# the very first `terraform apply`, or the initial ECS services will fail to
+# pull an image and never go healthy.
+bootstrap_image_tag = "latest"
+
+# After the first apply, copy the alb_dns_name output here (as an
+# http:// origin) and re-apply so the backend's CORS allowlist covers the
+# real ALB URL. Add your local dev origins too if you want to hit the
+# production API from local frontend builds (not recommended).
+cors_origins = "http://REPLACE_WITH_YOUR_ALB_DNS_NAME"
+
+# CloudWatch Logs retention, in days — kept short by default for cost.
+log_retention_days = 7
+
+# Reserved for a future ECS Service Auto Scaling phase — not wired to any
+# resource yet, just declared so that phase is additive, not a breaking
+# change to this file.
+# ecs_min_capacity = 1
+# ecs_max_capacity = 3

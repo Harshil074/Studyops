@@ -1,0 +1,32 @@
+# Secrets - never commit
+.env
+
+# Python
+__pycache__/
+*.pyc
+backend/venv/
+*.egg-info/
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
+
+# Node (for the React frontend, later)
+node_modules/
+frontend/build/
+frontend/dist/
+# Terraform
+terraform/.terraform/
+terraform/**/.terraform/
+kubernetes/terraform/.terraform/
+*.tfstate
+*.tfstate.*
+*.pem
+*.tfplan
+*.tfvars
+!*.tfvars.example
+
+# Terraform generated plan/output
+terraform/plan.txt
+tfplan

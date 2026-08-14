@@ -1,0 +1,118 @@
+stages:
+  - lint
+  - build
+  - deploy
+
+variables:
+  AWS_REGION: ap-south-1
+  ECR_BACKEND_REPO: studyops-backend
+  ECR_FRONTEND_REPO: studyops-frontend
+  ECS_CLUSTER: studyops-cluster
+  ECS_BACKEND_SERVICE: studyops-backend
+  ECS_FRONTEND_SERVICE: studyops-frontend
+  ECS_BACKEND_TASK_FAMILY: studyops-backend
+  ECS_FRONTEND_TASK_FAMILY: studyops-frontend
+
+# ---------------------------------------------------------------------
+# Runs on every push. Doesn't touch AWS.
+# ---------------------------------------------------------------------
+lint-backend:
+  stage: lint
+  image: python:3.11-slim
+  script:
+    - cd backend
+    - pip install -r requirements.txt --break-system-packages
+    - python -m py_compile $(find . -name "*.py")
+
+lint-frontend:
+  stage: lint
+  image: node:20-slim
+  script:
+    - cd frontend
+    - npm ci
+    - npm run lint --if-present
+    - npm run build
+
+# ---------------------------------------------------------------------
+# Only on main. Builds+scans+pushes BOTH images, tagged with the short
+# commit SHA (not just :latest) so every deploy traces back to an exact
+# commit.
+# ---------------------------------------------------------------------
+build-scan-push:
+  stage: build
+  image: docker:24.0
+  services:
+    - docker:24.0-dind
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  before_script:
+    - apk add --no-cache aws-cli curl
+    - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+  script:
+    - export ECR_REGISTRY=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+    - docker build -t $ECR_BACKEND_REPO:$CI_COMMIT_SHORT_SHA ./backend
+    - docker build -t $ECR_FRONTEND_REPO:$CI_COMMIT_SHORT_SHA ./frontend
+    # Trivy scan, report-only for now (matches the GitHub Actions pipeline) -
+    # tighten to fail the build once findings have been triaged.
+    - curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+    - trivy image --severity CRITICAL,HIGH --exit-code 0 $ECR_BACKEND_REPO:$CI_COMMIT_SHORT_SHA
+    - trivy image --severity CRITICAL,HIGH --exit-code 0 $ECR_FRONTEND_REPO:$CI_COMMIT_SHORT_SHA
+    - docker tag $ECR_BACKEND_REPO:$CI_COMMIT_SHORT_SHA $ECR_REGISTRY/$ECR_BACKEND_REPO:$CI_COMMIT_SHORT_SHA
+    - docker tag $ECR_BACKEND_REPO:$CI_COMMIT_SHORT_SHA $ECR_REGISTRY/$ECR_BACKEND_REPO:latest
+    - docker tag $ECR_FRONTEND_REPO:$CI_COMMIT_SHORT_SHA $ECR_REGISTRY/$ECR_FRONTEND_REPO:$CI_COMMIT_SHORT_SHA
+    - docker tag $ECR_FRONTEND_REPO:$CI_COMMIT_SHORT_SHA $ECR_REGISTRY/$ECR_FRONTEND_REPO:latest
+    - docker push $ECR_REGISTRY/$ECR_BACKEND_REPO:$CI_COMMIT_SHORT_SHA
+    - docker push $ECR_REGISTRY/$ECR_BACKEND_REPO:latest
+    - docker push $ECR_REGISTRY/$ECR_FRONTEND_REPO:$CI_COMMIT_SHORT_SHA
+    - docker push $ECR_REGISTRY/$ECR_FRONTEND_REPO:latest
+
+# ---------------------------------------------------------------------
+# Deploys the just-pushed images to the ECS services Terraform already
+# created. Deliberately separate from `terraform apply` - Terraform's task
+# definitions have lifecycle.ignore_changes so it won't fight this job.
+# ---------------------------------------------------------------------
+deploy:
+  stage: deploy
+  image: public.ecr.aws/aws-cli/aws-cli:latest
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  script:
+    - export ECR_REGISTRY=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+
+    - aws ecs describe-task-definition --task-definition $ECS_BACKEND_TASK_FAMILY --query taskDefinition > backend-task-def.json
+    - >
+      NEW_BACKEND_TASK_DEF=$(python3 -c "
+      import json,sys
+      d=json.load(open('backend-task-def.json'))
+      for c in d['containerDefinitions']:
+          if c['name']=='backend':
+              c['image']='$ECR_REGISTRY/$ECR_BACKEND_REPO:$CI_COMMIT_SHORT_SHA'
+      for k in ['taskDefinitionArn','revision','status','requiresAttributes','compatibilities','registeredAt','registeredBy']:
+          d.pop(k, None)
+      print(json.dumps(d))
+      ")
+    - echo "$NEW_BACKEND_TASK_DEF" > backend-task-def-new.json
+    - aws ecs register-task-definition --cli-input-json file://backend-task-def-new.json
+    - aws ecs update-service --cluster $ECS_CLUSTER --service $ECS_BACKEND_SERVICE --task-definition $ECS_BACKEND_TASK_FAMILY --force-new-deployment
+    - aws ecs wait services-stable --cluster $ECS_CLUSTER --services $ECS_BACKEND_SERVICE
+
+    - aws ecs describe-task-definition --task-definition $ECS_FRONTEND_TASK_FAMILY --query taskDefinition > frontend-task-def.json
+    - >
+      NEW_FRONTEND_TASK_DEF=$(python3 -c "
+      import json,sys
+      d=json.load(open('frontend-task-def.json'))
+      for c in d['containerDefinitions']:
+          if c['name']=='frontend':
+              c['image']='$ECR_REGISTRY/$ECR_FRONTEND_REPO:$CI_COMMIT_SHORT_SHA'
+      for k in ['taskDefinitionArn','revision','status','requiresAttributes','compatibilities','registeredAt','registeredBy']:
+          d.pop(k, None)
+      print(json.dumps(d))
+      ")
+    - echo "$NEW_FRONTEND_TASK_DEF" > frontend-task-def-new.json
+    - aws ecs register-task-definition --cli-input-json file://frontend-task-def-new.json
+    - aws ecs update-service --cluster $ECS_CLUSTER --service $ECS_FRONTEND_SERVICE --task-definition $ECS_FRONTEND_TASK_FAMILY --force-new-deployment
+    - aws ecs wait services-stable --cluster $ECS_CLUSTER --services $ECS_FRONTEND_SERVICE
+
+    - ALB_DNS=$(aws elbv2 describe-load-balancers --names studyops-alb --query 'LoadBalancers[0].DNSName' --output text)
+    - echo "ALB $ALB_DNS"
+    - curl -f "http://$ALB_DNS/health" || (echo "Backend health check failed after deploy" && exit 1)

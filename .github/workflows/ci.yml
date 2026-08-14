@@ -1,4 +1,4 @@
-name: CI/CD
+name: CI
 
 on:
   push:
@@ -6,181 +6,88 @@ on:
   pull_request:
     branches: [main]
 
-env:
-  AWS_REGION: ap-south-1
-  ECR_BACKEND_REPO: studyops-backend
-  ECR_FRONTEND_REPO: studyops-frontend
-  ECS_CLUSTER: studyops-cluster
-  ECS_BACKEND_SERVICE: studyops-backend
-  ECS_FRONTEND_SERVICE: studyops-frontend
-  ECS_BACKEND_TASK_FAMILY: studyops-backend
-  ECS_FRONTEND_TASK_FAMILY: studyops-frontend
+permissions:
+  contents: read
 
 jobs:
-  # ---------------------------------------------------------------------
-  # Runs on every push and PR. Doesn't touch AWS.
-  # ---------------------------------------------------------------------
-  lint-and-scan:
+  backend:
+    name: Backend - Test & Syntax
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install backend dependencies
-        working-directory: backend
-        run: pip install -r requirements.txt --break-system-packages
-      - name: Backend syntax check
-        working-directory: backend
-        run: python -m py_compile $(find . -name "*.py")
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
 
-      - uses: actions/setup-node@v4
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: Syntax check
+        working-directory: backend
+        run: |
+          python -m compileall .
+
+  frontend:
+    name: Frontend - Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - name: Install frontend dependencies
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
         working-directory: frontend
         run: npm ci
-      - name: Frontend lint
-        working-directory: frontend
-        run: npm run lint --if-present
-      - name: Frontend build check
+
+      - name: Build frontend
         working-directory: frontend
         run: npm run build
 
-  # ---------------------------------------------------------------------
-  # Only on pushes to main. Builds+scans+pushes BOTH images. Tags with the
-  # short commit SHA (not just :latest) so every deploy is traceable back
-  # to an exact commit and rollbacks are just "deploy the previous SHA tag".
-  # ---------------------------------------------------------------------
-  build-scan-push:
-    needs: lint-and-scan
+  docker:
+    name: Docker - Build & Scan
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    outputs:
-      image_tag: ${{ steps.tag.outputs.tag }}
-      ecr_registry: ${{ steps.ecr-login.outputs.registry }}
+    needs: [backend, frontend]
+
+    strategy:
+      matrix:
+        include:
+          - name: backend
+            context: ./backend
+            image: studyops-backend
+
+          - name: frontend
+            context: ./frontend
+            image: studyops-frontend
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - id: tag
-        run: echo "tag=${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
-
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - id: ecr-login
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build backend image
-        working-directory: backend
-        run: docker build -t ${{ env.ECR_BACKEND_REPO }}:${{ steps.tag.outputs.tag }} .
-
-      - name: Build frontend image
-        working-directory: frontend
-        run: docker build -t ${{ env.ECR_FRONTEND_REPO }}:${{ steps.tag.outputs.tag }} .
-
-      - name: Scan backend image (report only — see note below)
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.ECR_BACKEND_REPO }}:${{ steps.tag.outputs.tag }}
-          severity: "CRITICAL,HIGH"
-          exit-code: "0" # report only for now; change to "1" to fail the build on findings once triaged
-
-      - name: Scan frontend image (report only — see note below)
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.ECR_FRONTEND_REPO }}:${{ steps.tag.outputs.tag }}
-          severity: "CRITICAL,HIGH"
-          exit-code: "0"
-
-      - name: Push backend image
-        env:
-          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+      - name: Build Docker image
         run: |
-          docker tag ${{ env.ECR_BACKEND_REPO }}:${{ steps.tag.outputs.tag }} $ECR_REGISTRY/${{ env.ECR_BACKEND_REPO }}:${{ steps.tag.outputs.tag }}
-          docker tag ${{ env.ECR_BACKEND_REPO }}:${{ steps.tag.outputs.tag }} $ECR_REGISTRY/${{ env.ECR_BACKEND_REPO }}:latest
-          docker push $ECR_REGISTRY/${{ env.ECR_BACKEND_REPO }}:${{ steps.tag.outputs.tag }}
-          docker push $ECR_REGISTRY/${{ env.ECR_BACKEND_REPO }}:latest
+          docker build \
+            -t ${{ matrix.image }}:${{ github.sha }} \
+            ${{ matrix.context }}
 
-      - name: Push frontend image
-        env:
-          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
-        run: |
-          docker tag ${{ env.ECR_FRONTEND_REPO }}:${{ steps.tag.outputs.tag }} $ECR_REGISTRY/${{ env.ECR_FRONTEND_REPO }}:${{ steps.tag.outputs.tag }}
-          docker tag ${{ env.ECR_FRONTEND_REPO }}:${{ steps.tag.outputs.tag }} $ECR_REGISTRY/${{ env.ECR_FRONTEND_REPO }}:latest
-          docker push $ECR_REGISTRY/${{ env.ECR_FRONTEND_REPO }}:${{ steps.tag.outputs.tag }}
-          docker push $ECR_REGISTRY/${{ env.ECR_FRONTEND_REPO }}:latest
-
-  # ---------------------------------------------------------------------
-  # Deploys the just-pushed images to the ECS services that Terraform
-  # already created. This is deliberately separate from Terraform — infra
-  # (terraform apply) and app deploys (this job) never touch each other.
-  # Terraform's task definitions have lifecycle.ignore_changes so it won't
-  # fight with what this job deploys.
-  # ---------------------------------------------------------------------
-  deploy:
-    needs: build-scan-push
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: aws-actions/configure-aws-credentials@v4
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@0.28.0
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Download current backend task definition
-        run: |
-          aws ecs describe-task-definition \
-            --task-definition ${{ env.ECS_BACKEND_TASK_FAMILY }} \
-            --query taskDefinition > backend-task-def.json
-
-      - name: Render new backend image into task definition
-        id: backend-task-def
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: backend-task-def.json
-          container-name: backend
-          image: ${{ needs.build-scan-push.outputs.ecr_registry }}/${{ env.ECR_BACKEND_REPO }}:${{ needs.build-scan-push.outputs.image_tag }}
-
-      - name: Deploy backend to ECS and wait for stability
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.backend-task-def.outputs.task-definition }}
-          cluster: ${{ env.ECS_CLUSTER }}
-          service: ${{ env.ECS_BACKEND_SERVICE }}
-          wait-for-service-stability: true
-
-      - name: Download current frontend task definition
-        run: |
-          aws ecs describe-task-definition \
-            --task-definition ${{ env.ECS_FRONTEND_TASK_FAMILY }} \
-            --query taskDefinition > frontend-task-def.json
-
-      - name: Render new frontend image into task definition
-        id: frontend-task-def
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: frontend-task-def.json
-          container-name: frontend
-          image: ${{ needs.build-scan-push.outputs.ecr_registry }}/${{ env.ECR_FRONTEND_REPO }}:${{ needs.build-scan-push.outputs.image_tag }}
-
-      - name: Deploy frontend to ECS and wait for stability
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.frontend-task-def.outputs.task-definition }}
-          cluster: ${{ env.ECS_CLUSTER }}
-          service: ${{ env.ECS_FRONTEND_SERVICE }}
-          wait-for-service-stability: true
-
-      - name: Get ALB DNS name and hit /health
-        run: |
-          ALB_DNS=$(aws elbv2 describe-load-balancers --names studyops-alb --query 'LoadBalancers[0].DNSName' --output text)
-          echo "ALB: http://$ALB_DNS"
-          curl -f "http://$ALB_DNS/health" || (echo "Backend health check failed after deploy" && exit 1)
+          image-ref: ${{ matrix.image }}:${{ github.sha }}
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true

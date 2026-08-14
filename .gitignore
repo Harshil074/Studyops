@@ -30,3 +30,7 @@ kubernetes/terraform/.terraform/
 # Terraform generated plan/output
 terraform/plan.txt
 tfplan
+
+# Local AWS IAM setup files
+github-actions-trust-policy.json
+github-actions-deploy-policy.json

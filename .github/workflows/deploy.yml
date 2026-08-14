@@ -1,0 +1,137 @@
+name: CD
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-south-1
+
+  ECR_BACKEND: studyops-backend
+  ECR_FRONTEND: studyops-frontend
+
+  ECS_CLUSTER: studyops-cluster
+  ECS_BACKEND_SERVICE: studyops-backend
+  ECS_FRONTEND_SERVICE: studyops-frontend
+
+jobs:
+  deploy:
+    name: Build, Push & Deploy
+    runs-on: ubuntu-latest
+
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.2.3
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: StudyOpsGitHubActions
+
+      - name: Verify AWS identity
+        run: |
+          aws sts get-caller-identity
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build backend image
+        run: |
+          docker build \
+            -t ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_BACKEND }}:${{ github.event.workflow_run.head_sha }} \
+            ./backend
+
+      - name: Build frontend image
+        run: |
+          docker build \
+            -t ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_FRONTEND }}:${{ github.event.workflow_run.head_sha }} \
+            ./frontend
+
+      - name: Push backend image
+        run: |
+          docker push \
+            ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_BACKEND }}:${{ github.event.workflow_run.head_sha }}
+
+      - name: Push frontend image
+        run: |
+          docker push \
+            ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_FRONTEND }}:${{ github.event.workflow_run.head_sha }}
+
+      - name: Get current ECS task definitions
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition ${{ env.ECS_BACKEND_SERVICE }} \
+            --query taskDefinition \
+            > backend-task-definition.json
+
+          aws ecs describe-task-definition \
+            --task-definition ${{ env.ECS_FRONTEND_SERVICE }} \
+            --query taskDefinition \
+            > frontend-task-definition.json
+
+      - name: Render backend task definition
+        id: backend-task
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: backend-task-definition.json
+          container-name: backend
+          image: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_BACKEND }}:${{ github.event.workflow_run.head_sha }}
+
+      - name: Render frontend task definition
+        id: frontend-task
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: frontend-task-definition.json
+          container-name: frontend
+          image: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_FRONTEND }}:${{ github.event.workflow_run.head_sha }}
+
+      - name: Deploy backend to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.backend-task.outputs.task-definition }}
+          service: ${{ env.ECS_BACKEND_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+      - name: Deploy frontend to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.frontend-task.outputs.task-definition }}
+          service: ${{ env.ECS_FRONTEND_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+      - name: Verify ECS services
+        run: |
+          aws ecs describe-services \
+            --cluster "${{ env.ECS_CLUSTER }}" \
+            --services \
+              "${{ env.ECS_BACKEND_SERVICE }}" \
+              "${{ env.ECS_FRONTEND_SERVICE }}" \
+            --query 'services[*].[serviceName,status,runningCount,desiredCount]' \
+            --output table
+
+      - name: Deployment summary
+        run: |
+          echo "========================================"
+          echo "StudyOps deployment successful"
+          echo "========================================"
+          echo "Commit: ${{ github.event.workflow_run.head_sha }}"
+          echo "Backend: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_BACKEND }}:${{ github.event.workflow_run.head_sha }}"
+          echo "Frontend: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_FRONTEND }}:${{ github.event.workflow_run.head_sha }}"
+          echo "========================================"

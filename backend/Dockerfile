@@ -25,8 +25,21 @@ RUN pip install --no-cache-dir --upgrade \
 # just zip files containing package metadata, and reports vulnerabilities
 # for code that is never imported or executed. Removing them eliminates
 # the false source of these findings instead of ignoring the scan result.
-RUN PY_STDLIB="$(python3 -c 'import sysconfig; print(sysconfig.get_paths()["stdlib"])')" \
-    && rm -rf "${PY_STDLIB}/ensurepip/_bundled"
+#
+# Uses `find` (not a single guessed path) so this can't silently no-op,
+# and prints what it found/deleted directly into the build log as proof.
+RUN set -eux; \
+    echo ">>> Locating ensurepip bundled wheels before cleanup:"; \
+    find / -xdev -type d -path '*/ensurepip/_bundled' -print 2>/dev/null; \
+    find / -xdev -type d -path '*/ensurepip/_bundled' -print0 2>/dev/null \
+        | xargs -0 -r -I{} sh -c 'echo "  removing: {}"; rm -rf "{}"'; \
+    echo ">>> Verifying no ensurepip bundled wheels remain:"; \
+    remaining="$(find / -xdev -type d -path '*/ensurepip/_bundled' 2>/dev/null)"; \
+    if [ -n "$remaining" ]; then \
+        echo "ERROR: ensurepip bundled wheels still present: $remaining" >&2; \
+        exit 1; \
+    fi; \
+    echo ">>> Clean."
 
 # Copy application source
 COPY . .

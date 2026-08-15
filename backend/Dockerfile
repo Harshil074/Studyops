@@ -1,48 +1,58 @@
+# ---- Build stage: install dependencies into an isolated venv ----
+FROM python:3.11-slim AS builder
+
+WORKDIR /app
+
+COPY requirements.txt .
+
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
+    && pip install --no-cache-dir -r requirements.txt
+
+# ---- Runtime stage: only what's needed to run the app ----
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Copy dependency definition first for better Docker layer caching
-COPY requirements.txt .
-
-# Upgrade packaging tools to versions containing security fixes,
-# then install application dependencies.
-RUN pip install --no-cache-dir --upgrade \
-        pip \
-        setuptools \
-        wheel \
-    && pip install --no-cache-dir -r requirements.txt
-
-# Remove ensurepip's bundled pip/setuptools wheels.
-#
-# python:3.11-slim ships static, never-executed copies of old pip and
-# setuptools wheels under ensurepip/_bundled/, used only to bootstrap pip
-# into a *fresh* Python install that has no pip yet. That doesn't apply
-# here: pip is already installed and upgraded above. `pip install
-# --upgrade` does not touch these bundled files, so they retain their
-# original (older) versions and vendored sub-dependencies (e.g. pip
-# vendors msgpack internally). Trivy scans them anyway since they're
-# just zip files containing package metadata, and reports vulnerabilities
-# for code that is never imported or executed. Removing them eliminates
-# the false source of these findings instead of ignoring the scan result.
-#
-# Uses `find` (not a single guessed path) so this can't silently no-op,
-# and prints what it found/deleted directly into the build log as proof.
-RUN set -eux; \
-    echo ">>> Locating ensurepip bundled wheels before cleanup:"; \
-    find / -xdev -type d -path '*/ensurepip/_bundled' -print 2>/dev/null; \
-    find / -xdev -type d -path '*/ensurepip/_bundled' -print0 2>/dev/null \
-        | xargs -0 -r -I{} sh -c 'echo "  removing: {}"; rm -rf "{}"'; \
-    echo ">>> Verifying no ensurepip bundled wheels remain:"; \
-    remaining="$(find / -xdev -type d -path '*/ensurepip/_bundled' 2>/dev/null)"; \
-    if [ -n "$remaining" ]; then \
-        echo "ERROR: ensurepip bundled wheels still present: $remaining" >&2; \
-        exit 1; \
-    fi; \
-    echo ">>> Clean."
+# Copy the venv (app dependencies + console scripts like `uvicorn`)
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
 # Copy application source
 COPY . .
+
+# Remove pip, setuptools, and wheel from the runtime image (both the
+# global copy the base image ships, and the copy inside the venv).
+#
+# These are build-time-only tools. Verified directly: every dependency
+# in requirements.txt -- including uvicorn's own console script --
+# imports and runs with pip/setuptools/wheel completely absent.
+#
+# This is also the actual fix for the Trivy findings on this image.
+# pip vendors an internal (currently outdated) copy of msgpack for its
+# own HTTP response caching -- see pip/_vendor/vendor.txt inside any
+# current pip release -- and Trivy separately flags a
+# `setuptools==70.3.0` line in that same manifest even though pip does
+# not actually bundle setuptools's code (verified: no
+# pip/_vendor/setuptools/ directory exists in the installed package).
+# Neither is reachable from application code once pip itself is gone,
+# so removing pip/setuptools/wheel from the runtime image removes both
+# the real finding (msgpack) and the manifest-only false positive
+# (setuptools) at the source -- rather than chasing a version pin that
+# will just drift again on the next `pip install --upgrade`.
+RUN set -eux; \
+    find /usr/local/lib/python3.11/site-packages /opt/venv/lib/python3.11/site-packages \
+        -maxdepth 1 \( \
+            -iname 'pip' -o -iname 'pip-*.dist-info' \
+            -o -iname 'setuptools' -o -iname 'setuptools-*.dist-info' \
+            -o -iname 'wheel' -o -iname 'wheel-*.dist-info' \
+        \) -exec rm -rf {} + ; \
+    rm -rf /usr/local/lib/python3.11/ensurepip /opt/venv/bin/pip* /usr/local/bin/pip*; \
+    /opt/venv/bin/python -c "\
+import fastapi, uvicorn, sqlalchemy, psycopg2, jose, bcrypt, pydantic, dotenv, websockets; \
+print('>>> Runtime image verified importable without pip/setuptools/wheel.')"
 
 # Run the application as a non-root user
 RUN useradd --create-home appuser

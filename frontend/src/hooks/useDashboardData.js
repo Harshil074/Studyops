@@ -17,7 +17,8 @@ export function useDashboardData() {
   const [liveEvent, setLiveEvent] = useState(null)
 
   // Same WebSocket wiring as the original Dashboard.jsx — untouched.
-  const wsUrl = token ? `ws://localhost:8000/ws/progress?token=${token}` : null
+  const WS_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/^http/, 'ws')
+  const wsUrl = token ? `${WS_BASE_URL}/api/ws/progress?token=${token}` : null
   const { lastJsonMessage, readyState } = useWebSocket(wsUrl, {
     shouldReconnect: () => true,
     reconnectInterval: 3000,

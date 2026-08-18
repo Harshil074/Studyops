@@ -59,6 +59,7 @@ jobs:
       - name: Build frontend image
         run: |
           docker build \
+            --build-arg VITE_API_URL=${{ vars.VITE_API_URL }} \
             -t ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_FRONTEND }}:${{ github.event.workflow_run.head_sha }} \
             ./frontend
 

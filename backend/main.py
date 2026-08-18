@@ -25,8 +25,8 @@ def on_startup():
 
 
 app.include_router(health.router)
-app.include_router(auth.router)
-app.include_router(homework_router.router)
-app.include_router(mocktest_router.router)
-app.include_router(progress.router)
-app.include_router(ws.router)
+app.include_router(auth.router, prefix="/api")
+app.include_router(homework_router.router, prefix="/api")
+app.include_router(mocktest_router.router, prefix="/api")
+app.include_router(progress.router, prefix="/api")
+app.include_router(ws.router, prefix="/api")

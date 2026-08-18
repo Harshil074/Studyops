@@ -14,6 +14,18 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
 # ---- Runtime stage: only what's needed to run the app ----
 FROM python:3.11-slim
 
+# Apply the latest Debian security patches to OS packages.
+#
+# Trivy flagged CVE-2026-53615 in util-linux and everything built from
+# it (libblkid1, mount, login, libuuid1, libmount1, libsmartcols1,
+# liblastlog2-2, bsdutils) -- a newly-disclosed CVE, fixed upstream in
+# Debian's package repos, but not yet baked into the python:3.11-slim
+# image tag itself. `apt-get upgrade` pulls the patched versions at
+# build time regardless of how stale the base image layer is.
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Copy the venv (app dependencies + console scripts like `uvicorn`)
